@@ -32,4 +32,9 @@ public class Camera1Capturer extends CameraCapturer {
         surfaceTextureHelper, Camera1Enumerator.getCameraIndex(cameraName), width, height,
         framerate);
   }
+
+  @Override
+  public void toggleCameraFlash(CameraFlashHandler flashEventsHandler) {
+    throw new UnsupportedOperationException("TODO");
+  }
 }

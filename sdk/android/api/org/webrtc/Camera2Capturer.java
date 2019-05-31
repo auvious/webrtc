@@ -35,4 +35,10 @@ public class Camera2Capturer extends CameraCapturer {
     Camera2Session.create(createSessionCallback, events, applicationContext, cameraManager,
         surfaceTextureHelper, cameraName, width, height, framerate);
   }
+
+  @Override
+  public void toggleCameraFlash(CameraFlashHandler flashEventsHandler) {
+    throw new UnsupportedOperationException("TODO");
+  }
+
 }
