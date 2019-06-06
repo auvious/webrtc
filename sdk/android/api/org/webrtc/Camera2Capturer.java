@@ -13,6 +13,7 @@ package org.webrtc;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.hardware.camera2.CameraManager;
+import android.os.Build;
 import android.support.annotation.Nullable;
 
 @TargetApi(21)
@@ -37,8 +38,18 @@ public class Camera2Capturer extends CameraCapturer {
   }
 
   @Override
-  public void toggleCameraFlash(CameraFlashHandler flashEventsHandler) {
-    throw new UnsupportedOperationException("TODO");
+  public void setFlashlight(boolean value, FlashlightHandler flashlightEventsHandler) {
+		try {
+			String cameraId = cameraManager.getCameraIdList()[0];
+      if (Build.VERSION.SDK_INT > Build.VERSION_CODES.M) {
+			  cameraManager.setTorchMode(cameraId, value);
+			  flashlightEventsHandler.onFlashlightSetDone();
+      } else {
+        throw new UnsupportedOperationException("Invalid build version");
+      }
+		} catch (Throwable throwable) {
+			flashlightEventsHandler.onFlashlightSetError(throwable.getMessage());
+		}
   }
 
 }

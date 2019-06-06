@@ -59,12 +59,12 @@ public interface CameraVideoCapturer extends VideoCapturer {
   /**
    * Camera torch handler - one of these functions are invoked with the result of switchTorch().
    */
-  public interface CameraFlashHandler {
+  public interface FlashlightHandler {
     // Invoked on success.
-    void onCameraFlashToggleDone();
+    void onFlashlightSetDone();
 
     // Invoked on failure, e.g. camera doesn't have flash.
-    void onCameraFlashToggleError(String errorDescription);
+    void onFlashlightSetError(String errorDescription);
   }
 
   /**
@@ -74,9 +74,9 @@ public interface CameraVideoCapturer extends VideoCapturer {
   void switchCamera(CameraSwitchHandler switchEventsHandler);
 
   /**
-   * Toggle flash.
+   * Switches flash on or off. This function can be called from any thread.
    */
-  void toggleCameraFlash(CameraFlashHandler flashEventsHandler);
+  void setFlashlight(boolean value, FlashlightHandler flashlightEventsHandler);
 
   /**
    * MediaRecorder add/remove handler - one of these functions are invoked with the result of

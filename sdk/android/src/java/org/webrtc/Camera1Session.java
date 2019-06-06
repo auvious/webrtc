@@ -12,6 +12,7 @@ package org.webrtc;
 
 import android.content.Context;
 import android.graphics.Matrix;
+import android.hardware.Camera;
 import android.os.Handler;
 import android.os.SystemClock;
 import android.support.annotation.Nullable;
@@ -328,4 +329,25 @@ class Camera1Session implements CameraSession {
       throw new IllegalStateException("Wrong thread");
     }
   }
+
+	private void turnFlashlightOn() {
+		Camera.Parameters parameters = camera.getParameters();
+		parameters.setFlashMode(Camera.Parameters.FLASH_MODE_TORCH);
+		camera.setParameters(parameters);
+	}
+
+	private void turnFlashlightOff() {
+		Camera.Parameters parameters = camera.getParameters();
+		parameters.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);
+		camera.setParameters(parameters);
+	}
+
+  @Override
+	public void setFlashlight(boolean value) {
+		if (value) {
+			turnFlashlightOn();
+		} else {
+			turnFlashlightOff();
+		}
+	}
 }

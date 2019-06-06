@@ -419,4 +419,9 @@ class Camera2Session implements CameraSession {
       throw new IllegalStateException("Wrong thread");
     }
   }
+
+  @Override
+  public void setFlashlight(boolean value) {
+    throw new UnsupportedOperationException("TODO");
+  }
 }
