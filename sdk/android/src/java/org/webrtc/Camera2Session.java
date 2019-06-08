@@ -68,6 +68,7 @@ class Camera2Session implements CameraSession {
 
   // Initialized when capture session is created
   @Nullable private CameraCaptureSession captureSession;
+  @Nullable private CaptureRequest.Builder captureRequestBuilder;
 
   // State
   private SessionState state = SessionState.RUNNING;
@@ -175,6 +176,7 @@ class Camera2Session implements CameraSession {
         chooseFocusMode(captureRequestBuilder);
 
         captureRequestBuilder.addTarget(surface);
+        Camera2Session.this.captureRequestBuilder = captureRequestBuilder;
         session.setRepeatingRequest(
             captureRequestBuilder.build(), new CameraCaptureCallback(), cameraThreadHandler);
       } catch (CameraAccessException e) {
@@ -422,6 +424,11 @@ class Camera2Session implements CameraSession {
 
   @Override
   public void setFlashlight(boolean value) {
-    throw new UnsupportedOperationException("TODO");
+    try {
+      captureRequestBuilder.set(CaptureRequest.FLASH_MODE, value ? CameraMetadata.FLASH_MODE_TORCH : CameraMetadata.FLASH_MODE_OFF);
+      captureSession.setRepeatingRequest(captureRequestBuilder.build(), new CameraCaptureCallback(), cameraThreadHandler);
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
   }
 }
