@@ -47,7 +47,7 @@ class MediaCodecVideoDecoderFactory implements VideoDecoderFactory {
   @Nullable
   @Override
   public VideoDecoder createDecoder(VideoCodecInfo codecType) {
-    VideoCodecType type = VideoCodecType.valueOf(codecType.getName());
+    VideoCodecType type = VideoCodecType.valueOf(codecType.getName().toUpperCase());
     MediaCodecInfo info = findCodecForType(type);
 
     if (info == null) {
