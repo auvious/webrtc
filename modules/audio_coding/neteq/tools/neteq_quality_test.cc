@@ -8,11 +8,12 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "modules/audio_coding/neteq/tools/neteq_quality_test.h"
+
 #include <stdio.h>
+
 #include <cmath>
 
-#include "api/audio_codecs/builtin_audio_decoder_factory.h"
-#include "modules/audio_coding/neteq/tools/neteq_quality_test.h"
 #include "modules/audio_coding/neteq/tools/output_audio_file.h"
 #include "modules/audio_coding/neteq/tools/output_wav_file.h"
 #include "modules/audio_coding/neteq/tools/resample_input_audio_file.h"
@@ -39,8 +40,13 @@ const std::string& DefaultOutFilename() {
 }
 
 // Common validator for file names.
-static bool ValidateFilename(const std::string& value, bool write) {
-  FILE* fid = write ? fopen(value.c_str(), "wb") : fopen(value.c_str(), "rb");
+static bool ValidateFilename(const std::string& value, bool is_output) {
+  if (!is_output) {
+    RTC_CHECK_NE(value.substr(value.find_last_of(".") + 1), "wav")
+        << "WAV file input is not supported";
+  }
+  FILE* fid =
+      is_output ? fopen(value.c_str(), "wb") : fopen(value.c_str(), "rb");
   if (fid == nullptr)
     return false;
   fclose(fid);
@@ -61,7 +67,10 @@ WEBRTC_DEFINE_string(out_filename,
                      DefaultOutFilename().c_str(),
                      "Name of output audio file.");
 
-WEBRTC_DEFINE_int(runtime_ms, 10000, "Simulated runtime (milliseconds).");
+WEBRTC_DEFINE_int(
+    runtime_ms,
+    10000,
+    "Simulated runtime (milliseconds). -1 will consume the complete file.");
 
 WEBRTC_DEFINE_int(packet_loss_rate, 10, "Percentile of packet loss.");
 
@@ -79,7 +88,7 @@ WEBRTC_DEFINE_int(
 WEBRTC_DEFINE_float(drift_factor, 0.0, "Time drift factor.");
 
 WEBRTC_DEFINE_int(preload_packets,
-                  0,
+                  1,
                   "Preload the buffer with this many packets.");
 
 WEBRTC_DEFINE_string(
@@ -132,10 +141,12 @@ static double ProbTrans00Solver(int units,
   return x;
 }
 
-NetEqQualityTest::NetEqQualityTest(int block_duration_ms,
-                                   int in_sampling_khz,
-                                   int out_sampling_khz,
-                                   const SdpAudioFormat& format)
+NetEqQualityTest::NetEqQualityTest(
+    int block_duration_ms,
+    int in_sampling_khz,
+    int out_sampling_khz,
+    const SdpAudioFormat& format,
+    const rtc::scoped_refptr<AudioDecoderFactory>& decoder_factory)
     : audio_format_(format),
       channels_(static_cast<size_t>(FLAG_channels)),
       decoded_time_ms_(0),
@@ -151,7 +162,8 @@ NetEqQualityTest::NetEqQualityTest(int block_duration_ms,
       max_payload_bytes_(0),
       in_file_(new ResampleInputAudioFile(FLAG_in_filename,
                                           FLAG_input_sample_rate,
-                                          in_sampling_khz * 1000)),
+                                          in_sampling_khz * 1000,
+                                          FLAG_runtime_ms > 0)),
       rtp_generator_(
           new RtpGenerator(in_sampling_khz_, 0, 0, decodable_time_ms_)),
       total_payload_size_bytes_(0) {
@@ -168,9 +180,6 @@ NetEqQualityTest::NetEqQualityTest(int block_duration_ms,
 
   RTC_CHECK(ValidateFilename(FLAG_out_filename, true))
       << "Invalid output filename.";
-
-  RTC_CHECK_GT(FLAG_runtime_ms, 0)
-      << "Invalid runtime, should be greater than 0.";
 
   RTC_CHECK(FLAG_packet_loss_rate >= 0 && FLAG_packet_loss_rate <= 100)
       << "Invalid packet loss percentile, should be between 0 and 100.";
@@ -206,8 +215,7 @@ NetEqQualityTest::NetEqQualityTest(int block_duration_ms,
 
   NetEq::Config config;
   config.sample_rate_hz = out_sampling_khz_ * 1000;
-  neteq_.reset(
-      NetEq::Create(config, webrtc::CreateBuiltinAudioDecoderFactory()));
+  neteq_.reset(NetEq::Create(config, decoder_factory));
   max_payload_bytes_ = in_size_samples_ * channels_ * sizeof(int16_t);
   in_data_.reset(new int16_t[in_size_samples_ * channels_]);
 }
@@ -406,12 +414,18 @@ int NetEqQualityTest::DecodeBlock() {
 
 void NetEqQualityTest::Simulate() {
   int audio_size_samples;
+  bool end_of_input = false;
+  int runtime_ms = FLAG_runtime_ms >= 0 ? FLAG_runtime_ms : INT_MAX;
 
-  while (decoded_time_ms_ < FLAG_runtime_ms) {
+  while (!end_of_input && decoded_time_ms_ < runtime_ms) {
     // Preload the buffer if needed.
     while (decodable_time_ms_ - FLAG_preload_packets * block_duration_ms_ <
            decoded_time_ms_) {
-      ASSERT_TRUE(in_file_->Read(in_size_samples_ * channels_, &in_data_[0]));
+      if (!in_file_->Read(in_size_samples_ * channels_, &in_data_[0])) {
+        end_of_input = true;
+        ASSERT_TRUE(end_of_input && FLAG_runtime_ms < 0);
+        break;
+      }
       payload_.Clear();
       payload_size_bytes_ = EncodeBlock(&in_data_[0], in_size_samples_,
                                         &payload_, max_payload_bytes_);

@@ -54,7 +54,6 @@
 #include "rtc_base/bind.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
-#include "rtc_base/numerics/safe_conversions.h"
 #include "rtc_base/string_encode.h"
 #include "rtc_base/strings/string_builder.h"
 #include "rtc_base/trace_event.h"
@@ -107,6 +106,10 @@ const char kDtlsSrtpSetupFailureRtcp[] =
     "Couldn't set up DTLS-SRTP on RTCP channel.";
 
 namespace {
+
+// Field trials.
+// Controls datagram transport support.
+const char kDatagramTransportFieldTrial[] = "WebRTC-DatagramTransport";
 
 // UMA metric names.
 const char kSimulcastVersionApplyLocalDescription[] =
@@ -653,11 +656,11 @@ void ReportSimulcastApiVersion(const char* name,
   bool has_legacy = false;
   bool has_spec_compliant = false;
   for (const ContentInfo& content : session.contents()) {
-    if (!content.description) {
+    if (!content.media_description()) {
       continue;
     }
-    has_spec_compliant |= content.description->HasSimulcast();
-    for (const StreamParams& sp : content.description->streams()) {
+    has_spec_compliant |= content.media_description()->HasSimulcast();
+    for (const StreamParams& sp : content.media_description()->streams()) {
       has_legacy |= sp.has_ssrc_group(cricket::kSimSsrcGroupSemantics);
     }
   }
@@ -750,6 +753,7 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
     bool presume_writable_when_fully_relayed;
     bool enable_ice_renomination;
     bool redetermine_role_on_ice_restart;
+    bool surface_ice_candidates_on_ice_transport_type_changed;
     absl::optional<int> ice_check_interval_strong_connectivity;
     absl::optional<int> ice_check_interval_weak_connectivity;
     absl::optional<int> ice_check_min_interval;
@@ -764,7 +768,7 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
     bool active_reset_srtp_params;
     bool use_media_transport;
     bool use_media_transport_for_data_channels;
-    bool use_datagram_transport;
+    absl::optional<bool> use_datagram_transport;
     absl::optional<CryptoOptions> crypto_options;
     bool offer_extmap_allow_mixed;
   };
@@ -805,6 +809,8 @@ bool PeerConnectionInterface::RTCConfiguration::operator==(
              o.presume_writable_when_fully_relayed &&
          enable_ice_renomination == o.enable_ice_renomination &&
          redetermine_role_on_ice_restart == o.redetermine_role_on_ice_restart &&
+         surface_ice_candidates_on_ice_transport_type_changed ==
+             o.surface_ice_candidates_on_ice_transport_type_changed &&
          ice_check_interval_strong_connectivity ==
              o.ice_check_interval_strong_connectivity &&
          ice_check_interval_weak_connectivity ==
@@ -856,6 +862,8 @@ void ExtractSharedMediaSessionOptions(
     cricket::MediaSessionOptions* session_options) {
   session_options->vad_enabled = rtc_options.voice_activity_detection;
   session_options->bundle_enabled = rtc_options.use_rtp_mux;
+  session_options->raw_packetization_for_video =
+      rtc_options.raw_packetization_for_video;
 }
 
 PeerConnection::PeerConnection(PeerConnectionFactory* factory,
@@ -864,6 +872,8 @@ PeerConnection::PeerConnection(PeerConnectionFactory* factory,
     : factory_(factory),
       event_log_(std::move(event_log)),
       event_log_ptr_(event_log_.get()),
+      datagram_transport_config_(
+          field_trial::FindFullName(kDatagramTransportFieldTrial)),
       rtcp_cname_(GenerateRtcpCname()),
       local_streams_(StreamCollection::Create()),
       remote_streams_(StreamCollection::Create()),
@@ -1023,8 +1033,10 @@ bool PeerConnection::Initialize(
 #endif
   config.active_reset_srtp_params = configuration.active_reset_srtp_params;
 
-  if (configuration.use_datagram_transport ||
-      configuration.use_media_transport ||
+  use_datagram_transport_ = datagram_transport_config_.enabled &&
+                            configuration.use_datagram_transport.value_or(
+                                datagram_transport_config_.default_value);
+  if (use_datagram_transport_ || configuration.use_media_transport ||
       configuration.use_media_transport_for_data_channels) {
     if (!factory_->media_transport_factory()) {
       RTC_DCHECK(false)
@@ -1054,7 +1066,7 @@ bool PeerConnection::Initialize(
     config.use_media_transport_for_media = configuration.use_media_transport;
     config.use_media_transport_for_data_channels =
         configuration.use_media_transport_for_data_channels;
-    config.use_datagram_transport = configuration.use_datagram_transport;
+    config.use_datagram_transport = use_datagram_transport_;
     config.media_transport_factory = factory_->media_transport_factory();
   }
 
@@ -1071,6 +1083,8 @@ bool PeerConnection::Initialize(
       this, &PeerConnection::OnTransportControllerGatheringState);
   transport_controller_->SignalIceCandidatesGathered.connect(
       this, &PeerConnection::OnTransportControllerCandidatesGathered);
+  transport_controller_->SignalIceCandidateError.connect(
+      this, &PeerConnection::OnTransportControllerCandidateError);
   transport_controller_->SignalIceCandidatesRemoved.connect(
       this, &PeerConnection::OnTransportControllerCandidatesRemoved);
   transport_controller_->SignalDtlsHandshakeError.connect(
@@ -1967,6 +1981,17 @@ void PeerConnection::CreateOffer(CreateSessionDescriptionObserver* observer,
     return;
   }
 
+  // If a session error has occurred the PeerConnection is in a possibly
+  // inconsistent state so fail right away.
+  if (session_error() != SessionError::kNone) {
+    std::string error_message = GetSessionErrorMsg();
+    RTC_LOG(LS_ERROR) << "CreateOffer: " << error_message;
+    PostCreateSessionDescriptionFailure(
+        observer,
+        RTCError(RTCErrorType::INTERNAL_ERROR, std::move(error_message)));
+    return;
+  }
+
   if (!ValidateOfferAnswerOptions(options)) {
     std::string error = "CreateOffer called with invalid options.";
     RTC_LOG(LS_ERROR) << error;
@@ -2070,6 +2095,17 @@ void PeerConnection::CreateAnswer(CreateSessionDescriptionObserver* observer,
   TRACE_EVENT0("webrtc", "PeerConnection::CreateAnswer");
   if (!observer) {
     RTC_LOG(LS_ERROR) << "CreateAnswer - observer is NULL.";
+    return;
+  }
+
+  // If a session error has occurred the PeerConnection is in a possibly
+  // inconsistent state so fail right away.
+  if (session_error() != SessionError::kNone) {
+    std::string error_message = GetSessionErrorMsg();
+    RTC_LOG(LS_ERROR) << "CreateAnswer: " << error_message;
+    PostCreateSessionDescriptionFailure(
+        observer,
+        RTCError(RTCErrorType::INTERNAL_ERROR, std::move(error_message)));
     return;
   }
 
@@ -2433,12 +2469,13 @@ static absl::string_view GetDefaultMidForPlanB(cricket::MediaType media_type) {
 void PeerConnection::FillInMissingRemoteMids(
     cricket::SessionDescription* new_remote_description) {
   RTC_DCHECK(new_remote_description);
+  const cricket::ContentInfos no_infos;
   const cricket::ContentInfos& local_contents =
       (local_description() ? local_description()->description()->contents()
-                           : cricket::ContentInfos());
+                           : no_infos);
   const cricket::ContentInfos& remote_contents =
       (remote_description() ? remote_description()->description()->contents()
-                            : cricket::ContentInfos());
+                            : no_infos);
   for (size_t i = 0; i < new_remote_description->contents().size(); ++i) {
     cricket::ContentInfo& content = new_remote_description->contents()[i];
     if (!content.name.empty()) {
@@ -3432,7 +3469,8 @@ bool PeerConnection::SetConfiguration(const RTCConfiguration& configuration,
 
   if (configuration.use_media_transport_for_data_channels ||
       configuration.use_media_transport ||
-      configuration.use_datagram_transport) {
+      (configuration.use_datagram_transport &&
+       *configuration.use_datagram_transport)) {
     RTC_CHECK(configuration.bundle_policy == kBundlePolicyMaxBundle)
         << "Media transport requires MaxBundle policy.";
   }
@@ -3447,6 +3485,8 @@ bool PeerConnection::SetConfiguration(const RTCConfiguration& configuration,
   modified_config.ice_candidate_pool_size =
       configuration.ice_candidate_pool_size;
   modified_config.prune_turn_ports = configuration.prune_turn_ports;
+  modified_config.surface_ice_candidates_on_ice_transport_type_changed =
+      configuration.surface_ice_candidates_on_ice_transport_type_changed;
   modified_config.ice_check_min_interval = configuration.ice_check_min_interval;
   modified_config.ice_check_interval_strong_connectivity =
       configuration.ice_check_interval_strong_connectivity;
@@ -3465,6 +3505,7 @@ bool PeerConnection::SetConfiguration(const RTCConfiguration& configuration,
   modified_config.use_media_transport = configuration.use_media_transport;
   modified_config.use_media_transport_for_data_channels =
       configuration.use_media_transport_for_data_channels;
+  modified_config.use_datagram_transport = configuration.use_datagram_transport;
   if (configuration != modified_config) {
     RTC_LOG(LS_ERROR) << "Modifying the configuration in an unsupported way.";
     return SafeSetError(RTCErrorType::INVALID_MODIFICATION, error);
@@ -3523,10 +3564,14 @@ bool PeerConnection::SetConfiguration(const RTCConfiguration& configuration,
   }
 
   transport_controller_->SetIceConfig(ParseIceConfig(modified_config));
+
+  use_datagram_transport_ = datagram_transport_config_.enabled &&
+                            modified_config.use_datagram_transport.value_or(
+                                datagram_transport_config_.default_value);
   transport_controller_->SetMediaTransportSettings(
       modified_config.use_media_transport,
       modified_config.use_media_transport_for_data_channels,
-      modified_config.use_datagram_transport);
+      use_datagram_transport_);
 
   if (configuration_.active_reset_srtp_params !=
       modified_config.active_reset_srtp_params) {
@@ -3679,29 +3724,6 @@ RTCError PeerConnection::SetBitrate(const BitrateSettings& bitrate) {
   return RTCError::OK();
 }
 
-void PeerConnection::SetBitrateAllocationStrategy(
-    std::unique_ptr<rtc::BitrateAllocationStrategy>
-        bitrate_allocation_strategy) {
-  if (!worker_thread()->IsCurrent()) {
-    // TODO(kwiberg): Use a lambda instead when C++14 makes it possible to
-    // move-capture values in lambdas.
-    struct Task {
-      PeerConnection* const pc;
-      std::unique_ptr<rtc::BitrateAllocationStrategy> strategy;
-      void operator()() {
-        RTC_DCHECK_RUN_ON(pc->worker_thread());
-        pc->call_->SetBitrateAllocationStrategy(std::move(strategy));
-      }
-    };
-    worker_thread()->Invoke<void>(
-        RTC_FROM_HERE, Task{this, std::move(bitrate_allocation_strategy)});
-    return;
-  }
-  RTC_DCHECK_RUN_ON(worker_thread());
-  RTC_DCHECK(call_.get());
-  call_->SetBitrateAllocationStrategy(std::move(bitrate_allocation_strategy));
-}
-
 void PeerConnection::SetAudioPlayout(bool playout) {
   if (!worker_thread()->IsCurrent()) {
     worker_thread()->Invoke<void>(
@@ -3756,21 +3778,6 @@ PeerConnection::GetFirstAudioTransceiver() const {
   return nullptr;
 }
 
-bool PeerConnection::StartRtcEventLog(rtc::PlatformFile file,
-                                      int64_t max_size_bytes) {
-  // TODO(eladalon): It would be better to not allow negative values into PC.
-  const size_t max_size = (max_size_bytes < 0)
-                              ? RtcEventLog::kUnlimitedOutput
-                              : rtc::saturated_cast<size_t>(max_size_bytes);
-  int64_t output_period_ms = webrtc::RtcEventLog::kImmediateOutput;
-  if (field_trial::IsEnabled("WebRTC-RtcEventLogNewFormat")) {
-    output_period_ms = 5000;
-  }
-  return StartRtcEventLog(
-      absl::make_unique<RtcEventLogOutputFile>(file, max_size),
-      output_period_ms);
-}
-
 bool PeerConnection::StartRtcEventLog(std::unique_ptr<RtcEventLogOutput> output,
                                       int64_t output_period_ms) {
   // TODO(eladalon): In C++14, this can be done with a lambda.
@@ -3788,8 +3795,11 @@ bool PeerConnection::StartRtcEventLog(std::unique_ptr<RtcEventLogOutput> output,
 
 bool PeerConnection::StartRtcEventLog(
     std::unique_ptr<RtcEventLogOutput> output) {
-  return StartRtcEventLog(std::move(output),
-                          webrtc::RtcEventLog::kImmediateOutput);
+  int64_t output_period_ms = webrtc::RtcEventLog::kImmediateOutput;
+  if (field_trial::IsEnabled("WebRTC-RtcEventLogNewFormat")) {
+    output_period_ms = 5000;
+  }
+  return StartRtcEventLog(std::move(output), output_period_ms);
 }
 
 void PeerConnection::StopRtcEventLog() {
@@ -4125,10 +4135,17 @@ void PeerConnection::SetIceConnectionState(IceConnectionState new_state) {
 
 void PeerConnection::SetStandardizedIceConnectionState(
     PeerConnectionInterface::IceConnectionState new_state) {
-  if (standardized_ice_connection_state_ == new_state)
+  if (standardized_ice_connection_state_ == new_state) {
     return;
-  if (IsClosed())
+  }
+
+  if (IsClosed()) {
     return;
+  }
+
+  RTC_LOG(LS_INFO) << "Changing standardized IceConnectionState "
+                   << standardized_ice_connection_state_ << " => " << new_state;
+
   standardized_ice_connection_state_ = new_state;
   Observer()->OnStandardizedIceConnectionChange(new_state);
 }
@@ -4167,6 +4184,16 @@ void PeerConnection::OnIceCandidate(
     NoteUsageEvent(UsageEvent::MDNS_CANDIDATE_COLLECTED);
   }
   Observer()->OnIceCandidate(candidate.get());
+}
+
+void PeerConnection::OnIceCandidateError(const std::string& host_candidate,
+                                         const std::string& url,
+                                         int error_code,
+                                         const std::string& error_text) {
+  if (IsClosed()) {
+    return;
+  }
+  Observer()->OnIceCandidateError(host_candidate, url, error_code, error_text);
 }
 
 void PeerConnection::OnIceCandidatesRemoved(
@@ -4302,11 +4329,20 @@ void PeerConnection::GetOptionsForOffer(
   session_options->offer_extmap_allow_mixed =
       configuration_.offer_extmap_allow_mixed;
 
-  if (configuration_.enable_dtls_srtp &&
-      !configuration_.enable_dtls_srtp.value()) {
+  if (configuration_.use_media_transport ||
+      configuration_.use_media_transport_for_data_channels) {
     session_options->media_transport_settings =
         transport_controller_->GenerateOrGetLastMediaTransportOffer();
   }
+
+  // If datagram transport is in use, add opaque transport parameters.
+  if (use_datagram_transport_) {
+    for (auto& options : session_options->media_description_options) {
+      options.transport_options.opaque_parameters =
+          transport_controller_->GetTransportParameters(options.mid);
+    }
+  }
+
   // Allow fallback for using obsolete SCTP syntax.
   // Note that the default in |session_options| is true, while
   // the default in |options| is false.
@@ -4472,12 +4508,13 @@ void PeerConnection::GetOptionsForUnifiedPlanOffer(
   // Rules for generating an offer are dictated by JSEP sections 5.2.1 (Initial
   // Offers) and 5.2.2 (Subsequent Offers).
   RTC_DCHECK_EQ(session_options->media_description_options.size(), 0);
+  const ContentInfos no_infos;
   const ContentInfos& local_contents =
       (local_description() ? local_description()->description()->contents()
-                           : ContentInfos());
+                           : no_infos);
   const ContentInfos& remote_contents =
       (remote_description() ? remote_description()->description()->contents()
-                            : ContentInfos());
+                            : no_infos);
   // The mline indices that can be recycled. New transceivers should reuse these
   // slots first.
   std::queue<size_t> recycleable_mline_indices;
@@ -4603,6 +4640,14 @@ void PeerConnection::GetOptionsForAnswer(
           RTC_FROM_HERE,
           rtc::Bind(&cricket::PortAllocator::GetPooledIceCredentials,
                     port_allocator_.get()));
+
+  // If datagram transport is in use, add opaque transport parameters.
+  if (use_datagram_transport_) {
+    for (auto& options : session_options->media_description_options) {
+      options.transport_options.opaque_parameters =
+          transport_controller_->GetTransportParameters(options.mid);
+    }
+  }
 }
 
 void PeerConnection::GetOptionsForPlanBAnswer(
@@ -5755,6 +5800,8 @@ cricket::IceConfig PeerConnection::ParseIceConfig(
   ice_config.continual_gathering_policy = gathering_policy;
   ice_config.presume_writable_when_fully_relayed =
       config.presume_writable_when_fully_relayed;
+  ice_config.surface_ice_candidates_on_ice_transport_type_changed =
+      config.surface_ice_candidates_on_ice_transport_type_changed;
   ice_config.ice_check_interval_strong_connectivity =
       config.ice_check_interval_strong_connectivity;
   ice_config.ice_check_interval_weak_connectivity =
@@ -6102,6 +6149,12 @@ void PeerConnection::OnTransportControllerCandidatesGathered(
     }
     OnIceCandidate(std::move(candidate));
   }
+}
+
+void PeerConnection::OnTransportControllerCandidateError(
+    const cricket::IceCandidateErrorEvent& event) {
+  OnIceCandidateError(event.host_candidate, event.url, event.error_code,
+                      event.error_text);
 }
 
 void PeerConnection::OnTransportControllerCandidatesRemoved(
@@ -6726,7 +6779,7 @@ RTCError PeerConnection::ValidateSessionDescription(
     // same type. With Unified Plan, there can only be at most one track per
     // media section.
     for (const ContentInfo& content : sdesc->description()->contents()) {
-      const MediaContentDescription& desc = *content.description;
+      const MediaContentDescription& desc = *content.media_description();
       if ((desc.type() == cricket::MEDIA_TYPE_AUDIO ||
            desc.type() == cricket::MEDIA_TYPE_VIDEO) &&
           desc.streams().size() > 1u) {
@@ -6903,7 +6956,7 @@ bool PeerConnection::ReadyToUseRemoteCandidate(
 }
 
 bool PeerConnection::SrtpRequired() const {
-  return !configuration_.use_datagram_transport &&
+  return !use_datagram_transport_ &&
          (dtls_enabled_ ||
           webrtc_session_desc_factory_->SdesPolicy() == cricket::SEC_REQUIRED);
 }

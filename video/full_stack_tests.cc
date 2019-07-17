@@ -290,9 +290,8 @@ TEST(FullStackTest, ForemanCifLink150kbpsWithoutPacketLoss) {
       30000, 500000, 2000000, false,
       "VP8", 1,      0,       0,
       false, false,  true,    ClipNameToClipPath("foreman_cif")};
-  foreman_cif.analyzer = {"foreman_cif_link_150kbps_net_delay_0_0_plr_0",
-                          0.0, 0.0,
-                          kFullStackTestDurationSecs};
+  foreman_cif.analyzer = {"foreman_cif_link_150kbps_net_delay_0_0_plr_0", 0.0,
+                          0.0, kFullStackTestDurationSecs};
   foreman_cif.config->link_capacity_kbps = 150;
   fixture->RunWithAnalyzer(foreman_cif);
 }
@@ -834,19 +833,12 @@ TEST(FullStackTest, ScreenshareSlidesVP8_2TL) {
   fixture->RunWithAnalyzer(screenshare);
 }
 
-#if !defined(WEBRTC_MAC)
-// All the tests using this constant are disabled on Mac.
-const char kScreenshareSimulcastExperiment[] =
-    "WebRTC-SimulcastScreenshare/Enabled/";
+#if !defined(WEBRTC_MAC) && !defined(WEBRTC_WIN)
 // TODO(bugs.webrtc.org/9840): Investigate why is this test flaky on Win/Mac.
-#if !defined(WEBRTC_WIN)
 const char kScreenshareSimulcastVariableFramerateExperiment[] =
-    "WebRTC-SimulcastScreenshare/Enabled/"
     "WebRTC-VP8VariableFramerateScreenshare/"
     "Enabled,min_fps:5.0,min_qp:15,undershoot:30/";
 TEST(FullStackTest, ScreenshareSlidesVP8_2TL_Simulcast) {
-  test::ScopedFieldTrials field_trial(
-      AppendFieldTrials(kScreenshareSimulcastExperiment));
   auto fixture = CreateVideoQualityTestFixture();
   ParamsWithLogging screenshare;
   screenshare.call.send_side_bwe = true;
@@ -905,8 +897,6 @@ TEST(FullStackTest, ScreenshareSlidesVP8_2TL_Simulcast_Variable_Framerate) {
 }
 
 TEST(FullStackTest, ScreenshareSlidesVP8_2TL_Simulcast_low) {
-  test::ScopedFieldTrials field_trial(
-      AppendFieldTrials(kScreenshareSimulcastExperiment));
   auto fixture = CreateVideoQualityTestFixture();
   ParamsWithLogging screenshare;
   screenshare.call.send_side_bwe = true;
@@ -934,8 +924,7 @@ TEST(FullStackTest, ScreenshareSlidesVP8_2TL_Simulcast_low) {
   fixture->RunWithAnalyzer(screenshare);
 }
 
-#endif  // !defined(WEBRTC_WIN)
-#endif  // !defined(WEBRTC_MAC)
+#endif  // !defined(WEBRTC_MAC) && !defined(WEBRTC_WIN)
 
 TEST(FullStackTest, ScreenshareSlidesVP8_2TL_Scroll) {
   auto fixture = CreateVideoQualityTestFixture();
@@ -1243,18 +1232,17 @@ TEST(FullStackTest, MAYBE_SimulcastFullHdOveruse) {
   auto fixture = CreateVideoQualityTestFixture();
   ParamsWithLogging simulcast;
   simulcast.call.send_side_bwe = true;
-  simulcast.video[0] = {true,    1920,    1080,  30,    800000,
-                        2500000, 2500000, false, "VP8", 3,
-                        2,       400000,  false, false, false, "Generator"};
+  simulcast.video[0] = {true,    1920,  1080,  30,         800000, 2500000,
+                        2500000, false, "VP8", 3,          2,      400000,
+                        false,   false, false, "Generator"};
   simulcast.analyzer = {"simulcast_HD_high", 0.0, 0.0,
                         kFullStackTestDurationSecs};
   simulcast.config->loss_percent = 0;
   simulcast.config->queue_delay_ms = 100;
   std::vector<VideoStream> streams = {
-    VideoQualityTest::DefaultVideoStream(simulcast, 0),
-    VideoQualityTest::DefaultVideoStream(simulcast, 0),
-    VideoQualityTest::DefaultVideoStream(simulcast, 0)
-  };
+      VideoQualityTest::DefaultVideoStream(simulcast, 0),
+      VideoQualityTest::DefaultVideoStream(simulcast, 0),
+      VideoQualityTest::DefaultVideoStream(simulcast, 0)};
   simulcast.ss[0] = {
       streams, 2, 1, 0, InterLayerPredMode::kOn, std::vector<SpatialLayer>(),
       true};
@@ -1482,8 +1470,6 @@ class DualStreamsTest : public ::testing::TestWithParam<int> {};
 #if !defined(WEBRTC_ANDROID) && !defined(WEBRTC_IOS) && !defined(WEBRTC_MAC)
 TEST_P(DualStreamsTest,
        ModeratelyRestricted_SlidesVp8_2TL_Simulcast_Video_Simulcast_High) {
-  test::ScopedFieldTrials field_trial(
-      AppendFieldTrials(std::string(kScreenshareSimulcastExperiment)));
   const int first_stream = GetParam();
   ParamsWithLogging dual_streams;
 
@@ -1550,10 +1536,9 @@ TEST_P(DualStreamsTest, Conference_Restricted) {
 
   // Screenshare Settings.
   dual_streams.screenshare[first_stream] = {true, false, 10};
-  dual_streams.video[first_stream] = {true,    1850,    1110,  5,     800000,
-                                      2500000, 2500000, false, "VP8", 3,
-                                      2,       400000,  false, false, false,
-                                      ""};
+  dual_streams.video[first_stream] = {true,    1850,  1110,  5, 800000, 2500000,
+                                      2500000, false, "VP8", 3, 2,      400000,
+                                      false,   false, false, ""};
   // Video settings.
   dual_streams.video[1 - first_stream] = {
       true,   1280,

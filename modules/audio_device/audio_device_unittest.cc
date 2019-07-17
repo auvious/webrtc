@@ -8,6 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "modules/audio_device/include/audio_device.h"
+
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -20,7 +22,6 @@
 #include "api/task_queue/default_task_queue_factory.h"
 #include "api/task_queue/task_queue_factory.h"
 #include "modules/audio_device/audio_device_impl.h"
-#include "modules/audio_device/include/audio_device.h"
 #include "modules/audio_device/include/mock_audio_transport.h"
 #include "rtc_base/buffer.h"
 #include "rtc_base/critical_section.h"
@@ -43,9 +44,9 @@ using ::testing::_;
 using ::testing::AtLeast;
 using ::testing::Ge;
 using ::testing::Invoke;
+using ::testing::Mock;
 using ::testing::NiceMock;
 using ::testing::NotNull;
-using ::testing::Mock;
 
 namespace webrtc {
 namespace {
@@ -815,6 +816,30 @@ TEST_P(AudioDeviceTest, InitStopInitRecording) {
   StopRecording();
 }
 
+// Verify that additional attempts to initialize or start recording while
+// already being active works. Additional calls should just be ignored.
+TEST_P(AudioDeviceTest, StartInitRecording) {
+  SKIP_TEST_IF_NOT(requirements_satisfied());
+  StartRecording();
+  // An additional attempt to initialize at this stage should be ignored.
+  EXPECT_EQ(0, audio_device()->InitRecording());
+  // Same for additional request to start recording while already active.
+  EXPECT_EQ(0, audio_device()->StartRecording());
+  StopRecording();
+}
+
+// Verify that additional attempts to initialize or start playou while
+// already being active works. Additional calls should just be ignored.
+TEST_P(AudioDeviceTest, StartInitPlayout) {
+  SKIP_TEST_IF_NOT(requirements_satisfied());
+  StartPlayout();
+  // An additional attempt to initialize at this stage should be ignored.
+  EXPECT_EQ(0, audio_device()->InitPlayout());
+  // Same for additional request to start playout while already active.
+  EXPECT_EQ(0, audio_device()->StartPlayout());
+  StopPlayout();
+}
+
 // Tests Init/Stop/Init recording while playout is active.
 TEST_P(AudioDeviceTest, InitStopInitRecordingWhilePlaying) {
   SKIP_TEST_IF_NOT(requirements_satisfied());
@@ -1042,6 +1067,8 @@ TEST_P(AudioDeviceTest, RunPlayoutAndRecordingInFullDuplex) {
   // (mainly on Windows) do not support mono.
   EXPECT_EQ(0, audio_device()->SetStereoPlayout(true));
   EXPECT_EQ(0, audio_device()->SetStereoRecording(true));
+  // Mute speakers to prevent howling.
+  EXPECT_EQ(0, audio_device()->SetSpeakerVolume(0));
   StartPlayout();
   StartRecording();
   event()->Wait(static_cast<int>(

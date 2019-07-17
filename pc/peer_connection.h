@@ -31,6 +31,7 @@
 #include "pc/stats_collector.h"
 #include "pc/stream_collection.h"
 #include "pc/webrtc_session_description_factory.h"
+#include "rtc_base/experiments/field_trial_parser.h"
 #include "rtc_base/race_checker.h"
 #include "rtc_base/unique_id_generator.h"
 
@@ -195,10 +196,6 @@ class PeerConnection : public PeerConnectionInternal,
 
   RTCError SetBitrate(const BitrateSettings& bitrate) override;
 
-  void SetBitrateAllocationStrategy(
-      std::unique_ptr<rtc::BitrateAllocationStrategy>
-          bitrate_allocation_strategy) override;
-
   void SetAudioPlayout(bool playout) override;
   void SetAudioRecording(bool recording) override;
 
@@ -209,8 +206,6 @@ class PeerConnection : public PeerConnectionInternal,
 
   rtc::scoped_refptr<SctpTransportInterface> GetSctpTransport() const override;
 
-  RTC_DEPRECATED bool StartRtcEventLog(rtc::PlatformFile file,
-                                       int64_t max_size_bytes) override;
   bool StartRtcEventLog(std::unique_ptr<RtcEventLogOutput> output,
                         int64_t output_period_ms) override;
   bool StartRtcEventLog(std::unique_ptr<RtcEventLogOutput> output) override;
@@ -309,6 +304,28 @@ class PeerConnection : public PeerConnectionInternal,
     // An RtpSender can have many SSRCs. The first one is used as a sort of ID
     // for communicating with the lower layers.
     uint32_t first_ssrc;
+  };
+
+  // Field-trial based configuration for datagram transport.
+  struct DatagramTransportConfig {
+    explicit DatagramTransportConfig(const std::string& field_trial)
+        : enabled("enabled", true), default_value("default_value", false) {
+      ParseFieldTrial({&enabled, &default_value}, field_trial);
+    }
+
+    // Whether datagram transport support is enabled at all.  Defaults to true,
+    // allowing datagram transport to be used if (a) the application provides a
+    // factory for it and (b) the configuration specifies its use.  This flag
+    // provides a kill-switch to force-disable datagram transport across all
+    // applications, without code changes.
+    FieldTrialFlag enabled;
+
+    // Whether the datagram transport is enabled or disabled by default.
+    // Defaults to false, meaning that applications must configure use of
+    // datagram transport through RTCConfiguration.  If set to true,
+    // applications will use the datagram transport by default (but may still
+    // explicitly configure themselves not to use it through RTCConfiguration).
+    FieldTrialFlag default_value;
   };
 
   // Implements MessageHandler.
@@ -415,11 +432,17 @@ class PeerConnection : public PeerConnectionInternal,
       PeerConnectionInterface::PeerConnectionState new_state)
       RTC_RUN_ON(signaling_thread());
 
-  // Called any time the IceGatheringState changes
+  // Called any time the IceGatheringState changes.
   void OnIceGatheringChange(IceGatheringState new_state)
       RTC_RUN_ON(signaling_thread());
   // New ICE candidate has been gathered.
   void OnIceCandidate(std::unique_ptr<IceCandidateInterface> candidate)
+      RTC_RUN_ON(signaling_thread());
+  // Gathering of an ICE candidate failed.
+  void OnIceCandidateError(const std::string& host_candidate,
+                           const std::string& url,
+                           int error_code,
+                           const std::string& error_text)
       RTC_RUN_ON(signaling_thread());
   // Some local ICE candidates have been removed.
   void OnIceCandidatesRemoved(const std::vector<cricket::Candidate>& candidates)
@@ -1002,6 +1025,9 @@ class PeerConnection : public PeerConnectionInternal,
       const std::string& transport_name,
       const std::vector<cricket::Candidate>& candidates)
       RTC_RUN_ON(signaling_thread());
+  void OnTransportControllerCandidateError(
+      const cricket::IceCandidateErrorEvent& event)
+      RTC_RUN_ON(signaling_thread());
   void OnTransportControllerCandidatesRemoved(
       const std::vector<cricket::Candidate>& candidates)
       RTC_RUN_ON(signaling_thread());
@@ -1114,6 +1140,12 @@ class PeerConnection : public PeerConnectionInternal,
       kIceGatheringNew;
   PeerConnectionInterface::RTCConfiguration configuration_
       RTC_GUARDED_BY(signaling_thread());
+
+  // Field-trial based configuration for datagram transport.
+  const DatagramTransportConfig datagram_transport_config_;
+
+  // Final, resolved value for whether datagram transport is in use.
+  bool use_datagram_transport_ RTC_GUARDED_BY(signaling_thread()) = false;
 
   // Cache configuration_.use_media_transport so that we can access it from
   // other threads.

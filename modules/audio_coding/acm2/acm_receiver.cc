@@ -12,6 +12,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+
 #include <cstdint>
 #include <vector>
 
@@ -93,8 +94,7 @@ int AcmReceiver::InsertPacket(const RTPHeader& rtp_header,
     format = neteq_->GetDecoderFormat(payload_type);
   }
   if (!format) {
-    RTC_LOG_F(LS_ERROR) << "Payload-type "
-                        << payload_type
+    RTC_LOG_F(LS_ERROR) << "Payload-type " << payload_type
                         << " is not registered.";
     return -1;
   }
@@ -216,8 +216,8 @@ int AcmReceiver::TargetDelayMs() const {
   return neteq_->TargetDelayMs();
 }
 
-absl::optional<std::pair<int, SdpAudioFormat>>
-    AcmReceiver::LastDecoder() const {
+absl::optional<std::pair<int, SdpAudioFormat>> AcmReceiver::LastDecoder()
+    const {
   rtc::CritScope lock(&crit_sect_);
   if (!last_decoder_) {
     return absl::nullopt;

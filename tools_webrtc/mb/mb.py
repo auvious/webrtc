@@ -157,6 +157,9 @@ class MetaBuildWrapper(object):
                             help='look up the command for a given config or '
                                  'builder')
     AddCommonOptions(subp)
+    subp.add_argument('--quiet', default=False, action='store_true',
+                      help='Print out just the arguments, '
+                           'do not emulate the output of the gen subcommand.')
     subp.set_defaults(func=self.CmdLookup)
 
     subp = subps.add_parser(
@@ -286,12 +289,15 @@ class MetaBuildWrapper(object):
 
   def CmdLookup(self):
     vals = self.Lookup()
-    cmd = self.GNCmd('gen', '_path_')
     gn_args = self.GNArgs(vals)
-    self.Print('\nWriting """\\\n%s""" to _path_/args.gn.\n' % gn_args)
-    env = None
+    if self.args.quiet:
+      self.Print(gn_args, end='')
+    else:
+      cmd = self.GNCmd('gen', '_path_')
+      self.Print('\nWriting """\\\n%s""" to _path_/args.gn.\n' % gn_args)
+      env = None
 
-    self.PrintCmd(cmd, env)
+      self.PrintCmd(cmd, env)
     return 0
 
   def CmdRun(self):
@@ -818,14 +824,18 @@ class MetaBuildWrapper(object):
 
     must_retry = False
     if test_type == 'script':
-      cmdline = ['../../' + self.ToSrcRelPath(isolate_map[target]['script'])]
+      cmdline += ['../../' + self.ToSrcRelPath(isolate_map[target]['script'])]
     elif is_android:
-      cmdline = ['../../build/android/test_wrapper/logdog_wrapper.py',
-                 '--target', target,
-                 '--logdog-bin-cmd', '../../bin/logdog_butler',
-                 '--logcat-output-file', '${ISOLATED_OUTDIR}/logcats',
-                 '--store-tombstones']
+      cmdline += ['../../build/android/test_wrapper/logdog_wrapper.py',
+                  '--target', target,
+                  '--logdog-bin-cmd', '../../bin/logdog_butler',
+                  '--logcat-output-file', '${ISOLATED_OUTDIR}/logcats',
+                  '--store-tombstones']
     else:
+      if test_type == 'raw':
+        cmdline.append('../../tools_webrtc/flags_compatibility.py')
+        extra_files.append('../../tools_webrtc/flags_compatibility.py')
+
       if isolate_map[target].get('use_webcam', False):
         cmdline.append('../../tools_webrtc/ensure_webcam_is_running.py')
         extra_files.append('../../tools_webrtc/ensure_webcam_is_running.py')

@@ -40,6 +40,7 @@
 #include "modules/congestion_controller/goog_cc/delay_based_bwe.h"
 #include "modules/congestion_controller/include/receive_side_congestion_controller.h"
 #include "modules/congestion_controller/rtp/transport_feedback_adapter.h"
+#include "modules/pacing/paced_sender.h"
 #include "modules/pacing/packet_router.h"
 #include "modules/remote_bitrate_estimator/include/bwe_defines.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp.h"
@@ -69,14 +70,6 @@ namespace webrtc {
 namespace {
 
 const int kNumMicrosecsPerSec = 1000000;
-
-void SortPacketFeedbackVector(std::vector<PacketFeedback>* vec) {
-  auto pred = [](const PacketFeedback& packet_feedback) {
-    return packet_feedback.arrival_time_ms == PacketFeedback::kNotReceived;
-  };
-  vec->erase(std::remove_if(vec->begin(), vec->end(), pred), vec->end());
-  std::sort(vec->begin(), vec->end(), PacketFeedbackComparator());
-}
 
 std::string SsrcToString(uint32_t ssrc) {
   rtc::StringBuilder ss;
@@ -1271,7 +1264,7 @@ void EventLogAnalyzer::CreateSendSideBweSimulationGraph(Plot* plot) {
   // and piping the output to plot_dynamics.py can be used as a hack to get the
   // internal state of various BWE components. In this case, it is important
   // we don't instantiate the AcknowledgedBitrateEstimator both here and in
-  // SendSideCongestionController since that would lead to duplicate outputs.
+  // GoogCcNetworkController since that would lead to duplicate outputs.
   AcknowledgedBitrateEstimator acknowledged_bitrate_estimator(
       &field_trial_config_,
       absl::make_unique<BitrateEstimator>(&field_trial_config_));
@@ -1315,16 +1308,16 @@ void EventLogAnalyzer::CreateSendSideBweSimulationGraph(Plot* plot) {
       absl::optional<uint32_t> bitrate_bps;
       if (feedback_msg) {
         observer.Update(goog_cc->OnTransportPacketsFeedback(*feedback_msg));
-        std::vector<PacketFeedback> feedback =
-            transport_feedback.GetTransportFeedbackVector();
-        SortPacketFeedbackVector(&feedback);
+        std::vector<PacketResult> feedback =
+            feedback_msg->SortedByReceiveTime();
         if (!feedback.empty()) {
 #if !(BWE_TEST_LOGGING_COMPILE_TIME_ENABLE)
           acknowledged_bitrate_estimator.IncomingPacketFeedbackVector(feedback);
 #endif  // !(BWE_TEST_LOGGING_COMPILE_TIME_ENABLE)
-          for (const PacketFeedback& packet : feedback)
-            acked_bitrate.Update(packet.payload_size, packet.arrival_time_ms);
-          bitrate_bps = acked_bitrate.Rate(feedback.back().arrival_time_ms);
+          for (const PacketResult& packet : feedback)
+            acked_bitrate.Update(packet.sent_packet.size.bytes(),
+                                 packet.receive_time.ms());
+          bitrate_bps = acked_bitrate.Rate(feedback.back().receive_time.ms());
         }
       }
 
@@ -1332,7 +1325,9 @@ void EventLogAnalyzer::CreateSendSideBweSimulationGraph(Plot* plot) {
       float y = bitrate_bps.value_or(0) / 1000;
       acked_time_series.points.emplace_back(x, y);
 #if !(BWE_TEST_LOGGING_COMPILE_TIME_ENABLE)
-      y = acknowledged_bitrate_estimator.bitrate_bps().value_or(0) / 1000;
+      y = acknowledged_bitrate_estimator.bitrate()
+              .value_or(DataRate::Zero())
+              .kbps();
       acked_estimate_time_series.points.emplace_back(x, y);
 #endif  // !(BWE_TEST_LOGGING_COMPILE_TIME_ENABLE)
       ++rtcp_iterator;

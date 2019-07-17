@@ -167,16 +167,17 @@ TEST_P(PCGenericDescriptorTest, ForemanCifPlr5Vp9) {
   fixture->Run(std::move(run_params));
 }
 
-TEST(PCFullStackTest, GeneratorWithoutPacketLossVp9Profile2) {
-  bool profile_2_is_supported = false;
-  for (const auto& codec : SupportedVP9Codecs()) {
-    if (ParseSdpForVP9Profile(codec.parameters)
-            .value_or(VP9Profile::kProfile0) == VP9Profile::kProfile2) {
-      profile_2_is_supported = true;
-    }
-  }
-  if (!profile_2_is_supported)
-    return;
+// VP9 2nd profile isn't supported on android arm and arm 64.
+#if (defined(WEBRTC_ANDROID) &&                                   \
+     (defined(WEBRTC_ARCH_ARM64) || defined(WEBRTC_ARCH_ARM))) || \
+    (defined(WEBRTC_IOS) && defined(WEBRTC_ARCH_ARM64))
+#define MAYBE_GeneratorWithoutPacketLossVp9Profile2 \
+  DISABLED_GeneratorWithoutPacketLossVp9Profile2
+#else
+#define MAYBE_GeneratorWithoutPacketLossVp9Profile2 \
+  GeneratorWithoutPacketLossVp9Profile2
+#endif
+TEST(PCFullStackTest, MAYBE_GeneratorWithoutPacketLossVp9Profile2) {
   std::unique_ptr<NetworkEmulationManager> network_emulation_manager =
       CreateNetworkEmulationManager();
   auto fixture = CreateTestFixture(
@@ -352,6 +353,54 @@ TEST(PCFullStackTest, ForemanCifLink150kbpsWithoutPacketLoss) {
   run_params.video_codec_name = cricket::kVp8CodecName;
   run_params.use_flex_fec = false;
   run_params.use_ulp_fec = false;
+  fixture->Run(std::move(run_params));
+}
+
+TEST(PCFullStackTest, ForemanCifLink130kbps100msDelay1PercentPacketLossUlpfec) {
+  std::unique_ptr<NetworkEmulationManager> network_emulation_manager =
+      CreateNetworkEmulationManager();
+  BuiltInNetworkBehaviorConfig config;
+  config.link_capacity_kbps = 130;
+  config.queue_delay_ms = 100;
+  config.loss_percent = 1;
+  auto fixture = CreateTestFixture(
+      "pc_foreman_cif_link_130kbps_delay100ms_loss1_ulpfec",
+      CreateTwoNetworkLinks(network_emulation_manager.get(), config),
+      [](PeerConfigurer* alice) {
+        VideoConfig video(352, 288, 30);
+        video.input_file_name = ClipNameToClipPath("foreman_cif");
+        video.stream_label = "alice-video";
+        alice->AddVideoConfig(std::move(video));
+      },
+      [](PeerConfigurer* bob) {});
+  RunParams run_params(TimeDelta::seconds(kTestDurationSec));
+  run_params.video_codec_name = cricket::kVp8CodecName;
+  run_params.use_flex_fec = false;
+  run_params.use_ulp_fec = true;
+  fixture->Run(std::move(run_params));
+}
+
+TEST(PCFullStackTest, ForemanCifLink50kbps100msDelay1PercentPacketLossUlpfec) {
+  std::unique_ptr<NetworkEmulationManager> network_emulation_manager =
+      CreateNetworkEmulationManager();
+  BuiltInNetworkBehaviorConfig config;
+  config.link_capacity_kbps = 50;
+  config.queue_delay_ms = 100;
+  config.loss_percent = 1;
+  auto fixture = CreateTestFixture(
+      "pc_foreman_cif_link_50kbps_delay100ms_loss1_ulpfec",
+      CreateTwoNetworkLinks(network_emulation_manager.get(), config),
+      [](PeerConfigurer* alice) {
+        VideoConfig video(352, 288, 30);
+        video.input_file_name = ClipNameToClipPath("foreman_cif");
+        video.stream_label = "alice-video";
+        alice->AddVideoConfig(std::move(video));
+      },
+      [](PeerConfigurer* bob) {});
+  RunParams run_params(TimeDelta::seconds(kTestDurationSec));
+  run_params.video_codec_name = cricket::kVp8CodecName;
+  run_params.use_flex_fec = false;
+  run_params.use_ulp_fec = true;
   fixture->Run(std::move(run_params));
 }
 
@@ -1042,19 +1091,13 @@ TEST(PCFullStackTest, ScreenshareSlidesVP8_2TL) {
 }
 
 #if !defined(WEBRTC_MAC)
-// All the tests using this constant are disabled on Mac.
-const char kScreenshareSimulcastExperiment[] =
-    "WebRTC-SimulcastScreenshare/Enabled/";
 // TODO(bugs.webrtc.org/9840): Investigate why is this test flaky on Win/Mac.
 #if !defined(WEBRTC_WIN)
 const char kScreenshareSimulcastVariableFramerateExperiment[] =
-    "WebRTC-SimulcastScreenshare/Enabled/"
     "WebRTC-VP8VariableFramerateScreenshare/"
     "Enabled,min_fps:5.0,min_qp:15,undershoot:30/";
 // TODO(bugs.webrtc.org/10639) requires simulcast/SVC support in PC framework
 TEST(PCFullStackTest, ScreenshareSlidesVP8_2TL_Simulcast) {
-  test::ScopedFieldTrials field_trial(
-      AppendFieldTrials(kScreenshareSimulcastExperiment));
   auto fixture = CreateVideoQualityTestFixture();
   ParamsWithLogging screenshare;
   screenshare.call.send_side_bwe = true;
@@ -1115,8 +1158,6 @@ TEST(PCFullStackTest, ScreenshareSlidesVP8_2TL_Simulcast_Variable_Framerate) {
 
 // TODO(bugs.webrtc.org/10639) requires simulcast/SVC support in PC framework
 TEST(PCFullStackTest, ScreenshareSlidesVP8_2TL_Simulcast_low) {
-  test::ScopedFieldTrials field_trial(
-      AppendFieldTrials(kScreenshareSimulcastExperiment));
   auto fixture = CreateVideoQualityTestFixture();
   ParamsWithLogging screenshare;
   screenshare.call.send_side_bwe = true;
@@ -1705,8 +1746,6 @@ class PCDualStreamsTest : public ::testing::TestWithParam<int> {};
 // TODO(bugs.webrtc.org/10639) requires simulcast/SVC support in PC framework
 TEST_P(PCDualStreamsTest,
        ModeratelyRestricted_SlidesVp8_2TL_Simulcast_Video_Simulcast_High) {
-  test::ScopedFieldTrials field_trial(
-      AppendFieldTrials(std::string(kScreenshareSimulcastExperiment)));
   const int first_stream = GetParam();
   ParamsWithLogging dual_streams;
 

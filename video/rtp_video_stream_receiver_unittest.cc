@@ -8,8 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#include "test/gmock.h"
-#include "test/gtest.h"
+#include "video/rtp_video_stream_receiver.h"
 
 #include "absl/memory/memory.h"
 #include "api/video/video_codec_type.h"
@@ -32,10 +31,12 @@
 #include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/field_trial.h"
 #include "test/field_trial.h"
-#include "video/rtp_video_stream_receiver.h"
+#include "test/gmock.h"
+#include "test/gtest.h"
 
 using ::testing::_;
 using ::testing::Invoke;
+using ::testing::SizeIs;
 using ::testing::Values;
 
 namespace webrtc {
@@ -56,6 +57,9 @@ class MockTransport : public Transport {
 class MockNackSender : public NackSender {
  public:
   MOCK_METHOD1(SendNack, void(const std::vector<uint16_t>& sequence_numbers));
+  MOCK_METHOD2(SendNack,
+               void(const std::vector<uint16_t>& sequence_numbers,
+                    bool buffering_allowed));
 };
 
 class MockKeyFrameRequestSender : public KeyFrameRequestSender {
@@ -718,6 +722,7 @@ TEST_P(RtpVideoStreamReceiverGenericDescriptorTest,
         EXPECT_EQ(frame->references[0], frame->id.picture_id - 90);
         EXPECT_EQ(frame->references[1], frame->id.picture_id - 80);
         EXPECT_EQ(frame->id.spatial_layer, kSpatialIndex);
+        EXPECT_THAT(frame->PacketInfos(), SizeIs(1));
       }));
 
   rtp_video_stream_receiver_->OnRtpPacket(rtp_packet);
@@ -782,6 +787,7 @@ TEST_P(RtpVideoStreamReceiverGenericDescriptorTest,
         EXPECT_EQ(frame->id.spatial_layer, kSpatialIndex);
         EXPECT_EQ(frame->EncodedImage()._encodedWidth, 480u);
         EXPECT_EQ(frame->EncodedImage()._encodedHeight, 360u);
+        EXPECT_THAT(frame->PacketInfos(), SizeIs(2));
       }));
 
   rtp_video_stream_receiver_->OnRtpPacket(second_packet);

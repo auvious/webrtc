@@ -74,7 +74,7 @@ class RtpTransportControllerSend final
   PacketRouter* packet_router() override;
 
   TransportFeedbackObserver* transport_feedback_observer() override;
-  RtpPacketSender* packet_sender() override;
+  RtpPacketPacer* packet_sender() override;
 
   void SetAllocatedSendBitrateLimits(int min_send_bitrate_bps,
                                      int max_padding_bitrate_bps,
@@ -96,7 +96,7 @@ class RtpTransportControllerSend final
   int64_t GetFirstPacketTimeMs() const override;
   void EnablePeriodicAlrProbing(bool enable) override;
   void OnSentPacket(const rtc::SentPacket& sent_packet) override;
-  void OnReceivedPacket(const RtpPacketReceived& received_packet) override;
+  void OnReceivedPacket(const ReceivedPacket& packet_msg) override;
 
   void SetSdpBitrateParameters(const BitrateConstraints& constraints) override;
   void SetClientBitratePreferences(const BitrateSettings& preferences) override;

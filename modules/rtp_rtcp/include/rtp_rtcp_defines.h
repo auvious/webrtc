@@ -12,6 +12,7 @@
 #define MODULES_RTP_RTCP_INCLUDE_RTP_RTCP_DEFINES_H_
 
 #include <stddef.h>
+
 #include <list>
 #include <vector>
 
@@ -43,8 +44,6 @@ const int kBogusRtpRateForAudioRtcp = 8000;
 // Minimum RTP header size in bytes.
 const uint8_t kRtpHeaderSize = 12;
 
-enum ProtectionType { kUnprotectedPacket, kProtectedPacket };
-
 enum StorageType { kDontRetransmit, kAllowRetransmission };
 
 bool IsLegalMidName(absl::string_view name);
@@ -58,6 +57,7 @@ enum RTPExtensionType : int {
   kRtpExtensionTransmissionTimeOffset,
   kRtpExtensionAudioLevel,
   kRtpExtensionAbsoluteSendTime,
+  kRtpExtensionAbsoluteCaptureTime,
   kRtpExtensionVideoRotation,
   kRtpExtensionTransportSequenceNumber,
   kRtpExtensionTransportSequenceNumber02,
@@ -71,6 +71,7 @@ enum RTPExtensionType : int {
   kRtpExtensionGenericFrameDescriptor00,
   kRtpExtensionGenericFrameDescriptor = kRtpExtensionGenericFrameDescriptor00,
   kRtpExtensionGenericFrameDescriptor01,
+  kRtpExtensionGenericFrameDescriptor02,
   kRtpExtensionColorSpace,
   kRtpExtensionNumberOfExtensions  // Must be the last entity in the enum.
 };
@@ -99,10 +100,6 @@ enum RTCPPacketType : uint32_t {
   kRtcpTransportFeedback = 0x100000,
   kRtcpXrTargetBitrate = 0x200000
 };
-
-enum KeyFrameRequestMethod { kKeyFrameReqPliRtcp, kKeyFrameReqFirRtcp };
-
-enum RtpRtcpPacketType { kPacketRtp = 0 };
 
 enum RtxMode {
   kRtxOff = 0x0,
@@ -282,17 +279,6 @@ struct PacketFeedback {
   uint16_t rtp_sequence_number;
 };
 
-class PacketFeedbackComparator {
- public:
-  inline bool operator()(const PacketFeedback& lhs, const PacketFeedback& rhs) {
-    if (lhs.arrival_time_ms != rhs.arrival_time_ms)
-      return lhs.arrival_time_ms < rhs.arrival_time_ms;
-    if (lhs.send_time_ms != rhs.send_time_ms)
-      return lhs.send_time_ms < rhs.send_time_ms;
-    return lhs.sequence_number < rhs.sequence_number;
-  }
-};
-
 struct RtpPacketSendInfo {
  public:
   RtpPacketSendInfo() = default;
@@ -346,34 +332,21 @@ class RtcpRttStats {
   virtual ~RtcpRttStats() {}
 };
 
-// Statistics about packet loss for a single directional connection. All values
-// are totals since the connection initiated.
-struct RtpPacketLossStats {
-  // The number of packets lost in events where no adjacent packets were also
-  // lost.
-  uint64_t single_packet_loss_count;
-  // The number of events in which more than one adjacent packet was lost.
-  uint64_t multiple_packet_loss_event_count;
-  // The number of packets lost in events where more than one adjacent packet
-  // was lost.
-  uint64_t multiple_packet_loss_packet_count;
-};
-
+// This class will be deprecated and replaced with RtpPacketPacer.
 class RtpPacketSender {
  public:
   RtpPacketSender() {}
   virtual ~RtpPacketSender() {}
 
+  // These are part of the legacy PacedSender interface and will be removed.
   enum Priority {
     kHighPriority = 0,    // Pass through; will be sent immediately.
     kNormalPriority = 2,  // Put in back of the line.
     kLowPriority = 3,     // Put in back of the low priority line.
   };
-  // Low priority packets are mixed with the normal priority packets
-  // while we are paused.
 
-  // Returns true if we send the packet now, else it will add the packet
-  // information to the queue and call TimeToSendPacket when it's time to send.
+  // Adds the packet information to the queue and call TimeToSendPacket when
+  // it's time to send.
   virtual void InsertPacket(Priority priority,
                             uint32_t ssrc,
                             uint16_t sequence_number,
@@ -386,7 +359,7 @@ class RtpPacketSender {
   // the pacer budget calculation. The audio traffic still will be injected
   // at high priority.
   // TODO(alexnarest): Make it pure virtual after rtp_sender_unittest will be
-  // updated to support it
+  // updated to support it.
   virtual void SetAccountForAudioPackets(bool account_for_audio) {}
 };
 
@@ -473,7 +446,7 @@ struct StreamDataCounters {
            fec.payload_bytes;
   }
 
-  int64_t first_packet_time_ms;    // Time when first packet is sent/received.
+  int64_t first_packet_time_ms;  // Time when first packet is sent/received.
   // The timestamp at which the last packet was received, i.e. the time of the
   // local clock when it was received - not the RTP timestamp of that packet.
   // https://w3c.github.io/webrtc-stats/#dom-rtcinboundrtpstreamstats-lastpacketreceivedtimestamp

@@ -12,6 +12,7 @@
 #define MODULES_CONGESTION_CONTROLLER_GOOG_CC_GOOG_CC_NETWORK_CONTROL_H_
 
 #include <stdint.h>
+
 #include <deque>
 #include <memory>
 #include <vector>
@@ -64,6 +65,8 @@ class GoogCcNetworkController : public NetworkControllerInterface {
   NetworkControlUpdate OnTransportLossReport(TransportLossReport msg) override;
   NetworkControlUpdate OnTransportPacketsFeedback(
       TransportPacketsFeedback msg) override;
+  NetworkControlUpdate OnNetworkStateEstimate(
+      NetworkStateEstimate msg) override;
 
   NetworkControlUpdate GetNetworkState(Timestamp at_time) const;
 
@@ -110,6 +113,8 @@ class GoogCcNetworkController : public NetworkControllerInterface {
 
   bool first_packet_sent_ = false;
 
+  absl::optional<NetworkStateEstimate> estimate_;
+
   Timestamp next_loss_update_ = Timestamp::MinusInfinity();
   int lost_packets_since_last_loss_update_ = 0;
   int expected_packets_since_last_loss_update_ = 0;
@@ -132,7 +137,6 @@ class GoogCcNetworkController : public NetworkControllerInterface {
   bool previously_in_alr_ = false;
 
   absl::optional<DataSize> current_data_window_;
-
 
   RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(GoogCcNetworkController);
 };
