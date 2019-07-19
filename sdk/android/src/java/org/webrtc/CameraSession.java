@@ -69,6 +69,4 @@ interface CameraSession {
     // value they should be after undoing the rotation.
     return buffer.applyTransformMatrix(transformMatrix, buffer.getWidth(), buffer.getHeight());
   }
-
-  void setFlashlight(boolean value);
 }

@@ -16,6 +16,10 @@ import android.hardware.camera2.CameraManager;
 import android.os.Build;
 import android.support.annotation.Nullable;
 
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CaptureRequest;
+
 @TargetApi(21)
 public class Camera2Capturer extends CameraCapturer {
   private final Context context;
@@ -50,13 +54,16 @@ public class Camera2Capturer extends CameraCapturer {
         surfaceTextureHelper, cameraName, width, height, framerate);
   }
 
-  @Override
-  public void setFlashlight(boolean value, FlashlightHandler flashlightEventsHandler) {
-		try {
-      camera2Session.setFlashlight(value);
-		} catch (Throwable throwable) {
-			flashlightEventsHandler.onFlashlightSetError(throwable.getMessage());
-		}
+  @Nullable
+  public CameraCaptureSession getCaptureSession() {
+      return this.camera2Session.getCaptureSession();
   }
 
+  public CameraCharacteristics getCameraCharacteristics() {
+      return this.camera2Session.getCameraCharacteristics();
+  }
+
+  @Nullable public CaptureRequest.Builder getCaptureRequestBuilder() {
+      return this.camera2Session.getCaptureRequestBuilder();
+  }
 }

@@ -422,13 +422,17 @@ class Camera2Session implements CameraSession {
     }
   }
 
-  @Override
-  public void setFlashlight(boolean value) {
-    try {
-      captureRequestBuilder.set(CaptureRequest.FLASH_MODE, value ? CameraMetadata.FLASH_MODE_TORCH : CameraMetadata.FLASH_MODE_OFF);
-      captureSession.setRepeatingRequest(captureRequestBuilder.build(), new CameraCaptureCallback(), cameraThreadHandler);
-    } catch (Exception e) {
-      throw new RuntimeException(e);
-    }
+  @Nullable
+  public CameraCaptureSession getCaptureSession() {
+      return captureSession;
+  }
+
+  public CameraCharacteristics getCameraCharacteristics() {
+      return cameraCharacteristics;
+  }
+
+  @Nullable
+  public CaptureRequest.Builder getCaptureRequestBuilder() {
+      return captureRequestBuilder;
   }
 }

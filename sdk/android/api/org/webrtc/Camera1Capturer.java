@@ -47,13 +47,7 @@ public class Camera1Capturer extends CameraCapturer {
         framerate);
   }
 
-  @Override
-	public void setFlashlight(boolean value, FlashlightHandler flashlightEventsHandler) {
-    try {
-      camera1Session.setFlashlight(value);
-      flashlightEventsHandler.onFlashlightSetDone();
-    } catch (Throwable throwable) {
-      flashlightEventsHandler.onFlashlightSetError(throwable.getMessage());
-    }
-	}
+  public android.hardware.Camera getCamera() {
+      return camera1Session.getCamera();
+  }
 }

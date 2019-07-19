@@ -330,24 +330,7 @@ class Camera1Session implements CameraSession {
     }
   }
 
-	private void turnFlashlightOn() {
-		Camera.Parameters parameters = camera.getParameters();
-		parameters.setFlashMode(Camera.Parameters.FLASH_MODE_TORCH);
-		camera.setParameters(parameters);
-	}
-
-	private void turnFlashlightOff() {
-		Camera.Parameters parameters = camera.getParameters();
-		parameters.setFlashMode(Camera.Parameters.FLASH_MODE_OFF);
-		camera.setParameters(parameters);
-	}
-
-  @Override
-	public void setFlashlight(boolean value) {
-		if (value) {
-			turnFlashlightOn();
-		} else {
-			turnFlashlightOff();
-		}
-	}
+  public android.hardware.Camera getCamera() {
+      return camera;
+  }
 }
