@@ -66,6 +66,7 @@ class Camera2Session implements CameraSession {
 
   // Initialized when capture session is created
   @Nullable private CameraCaptureSession captureSession;
+  @Nullable private CaptureRequest.Builder captureRequestBuilder;
 
   // State
   private SessionState state = SessionState.RUNNING;
@@ -173,6 +174,7 @@ class Camera2Session implements CameraSession {
         chooseFocusMode(captureRequestBuilder);
 
         captureRequestBuilder.addTarget(surface);
+        Camera2Session.this.captureRequestBuilder = captureRequestBuilder;
         session.setRepeatingRequest(
             captureRequestBuilder.build(), new CameraCaptureCallback(), cameraThreadHandler);
       } catch (CameraAccessException e) {
@@ -366,6 +368,20 @@ class Camera2Session implements CameraSession {
       final int stopTimeMs = (int) TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - stopStartTime);
       camera2StopTimeMsHistogram.addSample(stopTimeMs);
     }
+  }
+
+  @Nullable
+  public CameraCaptureSession getCaptureSession() {
+    return captureSession;
+  }
+
+  public CameraCharacteristics getCameraCharacteristics() {
+    return cameraCharacteristics;
+  }
+
+  @Nullable
+  public CaptureRequest.Builder getCaptureRequestBuilder() {
+    return captureRequestBuilder;
   }
 
   private void stopInternal() {
