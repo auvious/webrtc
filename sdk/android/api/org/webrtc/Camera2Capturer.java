@@ -12,13 +12,17 @@ package org.webrtc;
 
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraManager;
+import android.hardware.camera2.CaptureRequest;
 import android.support.annotation.Nullable;
 
 @TargetApi(21)
 public class Camera2Capturer extends CameraCapturer {
   private final Context context;
   @Nullable private final CameraManager cameraManager;
+  private Camera2Session camera2Session;
 
   public Camera2Capturer(Context context, String cameraName, CameraEventsHandler eventsHandler) {
     super(cameraName, eventsHandler, new Camera2Enumerator(context));
@@ -32,7 +36,34 @@ public class Camera2Capturer extends CameraCapturer {
       CameraSession.Events events, Context applicationContext,
       SurfaceTextureHelper surfaceTextureHelper, String cameraName, int width, int height,
       int framerate) {
-    Camera2Session.create(createSessionCallback, events, applicationContext, cameraManager,
+    CameraSession.CreateSessionCallback createSessionCallbackWrapper = new CameraSession.CreateSessionCallback() {
+      @Override
+      public void onDone(CameraSession session) {
+        Camera2Capturer.this.camera2Session = (Camera2Session) session;
+        createSessionCallback.onDone(session);
+      }
+
+      @Override
+      public void onFailure(CameraSession.FailureType failureType, String error) {
+        createSessionCallback.onFailure(failureType, error);
+      }
+    };
+
+    Camera2Session.create(createSessionCallbackWrapper, events, applicationContext, cameraManager,
         surfaceTextureHelper, cameraName, width, height, framerate);
+  }
+
+  @Nullable
+  public CameraCaptureSession getCaptureSession() {
+    return this.camera2Session.getCaptureSession();
+  }
+
+  public CameraCharacteristics getCameraCharacteristics() {
+    return this.camera2Session.getCameraCharacteristics();
+  }
+
+  @Nullable
+  public CaptureRequest.Builder getCaptureRequestBuilder() {
+    return this.camera2Session.getCaptureRequestBuilder();
   }
 }
